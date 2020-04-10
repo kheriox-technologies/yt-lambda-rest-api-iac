@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM Template for Employees Rest API
+
+Parameters:
+  AppName:
+    Type: String
+    Description: Application Name. Used for naming resources
+
+Globals:
+  Function:
+    Timeout: 900
+    MemorySize: 1024
+    Layers:
+      - !Ref LambdaLayer
+    Environment:
+      Variables:
+        EMPLOYEES_DDB_TABLE: !Ref EmployeesDDBTable
+
+Resources:
+  EmployeesDDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AppName}-table'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+        - AttributeName: department
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+        - AttributeName: department
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: department-index
+          KeySchema:
+            - AttributeName: department
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+  LambdaLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub '${AppName}-lambda-layer'
+      Description: !Sub '${AppName} Lambda Layer'
+      ContentUri: lambda-layer/
+      CompatibleRuntimes:
+        - nodejs12.x
+      RetentionPolicy: Retain
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AppName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: '/'
+      Policies:
+        - PolicyName: cloudwatch
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Resource:
+                  - '*'
+        - PolicyName: ddbaccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:*
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EmployeesDDBTable}/*'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EmployeesDDBTable}'
+  GetData:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AppName}-get-data'
+      Handler: index.lambdaHandler
+      Runtime: nodejs12.x
+      Description: Get employee data from Dynamo DB
+      CodeUri: functions/get-data/
+      Role:
+        Fn::GetAtt: LambdaRole.Arn
+  PutData:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AppName}-put-data'
+      Handler: index.lambdaHandler
+      Runtime: nodejs12.x
+      Description: Add employee data to Dynamo DB
+      CodeUri: functions/put-data/
+      Role:
+        Fn::GetAtt: LambdaRole.Arn
+
+Outputs:
+  GetDataArn:
+    Description: ARN of Get Data Lambda Function
+    Value: !GetAtt GetData.Arn
+    Export:
+      Name: !Sub '${AppName}-get-data-arn'
+  PutDataArn:
+    Description: ARN of Put Data Lambda Function
+    Value: !GetAtt PutData.Arn
+    Export:
+      Name: !Sub '${AppName}-put-data-arn'
